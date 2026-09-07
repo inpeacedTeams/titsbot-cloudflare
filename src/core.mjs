@@ -75,7 +75,26 @@ export function mtMetrics(events,prompt,r=rules) {
   }
   const correct=buffer.filter((v,i)=>v===target[i]).length,residual=buffer.length-correct,accuracy=inserted?100*correctInserted/inserted:0,quality=buffer.length?100*(1-residual/buffer.length):0,wpm=correct/5/(c.duration/60);
   const parts={wpm:clamp(wpm/c.wpm_max*100),accuracy,consistency:consistency(bins),quality};
-  return {duration:c.duration,wpm,raw_wpm:inserted/5/(c.duration/60),accuracy,consistency:parts.consistency,quality,errors,corrections,remaining_errors:residual,inserted_characters:inserted,correct_characters:correct,key_presses:keys,first_event_ms:events[0]?.t??null,last_event_ms:events.length?last:null,score:inserted&&correct?weighted(parts,c.weights):0,components:parts};
+  return {timeline:mtTimeline(events,prompt,c.duration),duration:c.duration,wpm,raw_wpm:inserted/5/(c.duration/60),accuracy,consistency:parts.consistency,quality,errors,corrections,remaining_errors:residual,inserted_characters:inserted,correct_characters:correct,key_presses:keys,first_event_ms:events[0]?.t??null,last_event_ms:events.length?last:null,score:inserted&&correct?weighted(parts,c.weights):0,components:parts};
+}
+// Called after mtMetrics validates events. Cumulative speeds, per-second errors.
+export function mtTimeline(events,prompt,duration=30) {
+  const target=[...prompt],buffer=[],timeline=[];
+  let cursor=0,inserted=0,correct=0;
+  for(let second=1;second<=duration;second++) {
+    let errors=0;
+    while(cursor<events.length&&events[cursor].t<second*1000) {
+      const e=events[cursor++];
+      if(e.kind==='insert') {
+        const ok=e.char===target[buffer.length];
+        inserted++;correct+=Number(ok);errors+=Number(!ok);buffer.push(e.char);
+      } else if(e.kind==='delete'&&buffer.length) {
+        correct-=Number(buffer.at(-1)===target[buffer.length-1]);buffer.pop();
+      }
+    }
+    timeline.push({second,wpm:correct/5/(second/60),raw_wpm:inserted/5/(second/60),errors});
+  }
+  return timeline;
 }
 const RU='время человек сегодня дорога город свет книга ветер слово работа новая мысль тёплый вечер после рядом важно просто можно утром завтра вместе читать писать видеть помнить хороший каждый воздух тихо снова быстро спокойно вопрос ответ окно музыка солнце река лес берег поле голос смысл начало конец рука место друг разговор история мир движение радость план выбор шаг путь день ночь облако дождь жизнь задача решение внимание память знание опыт идея чувство сила помощь случай результат встреча весна лето осень зима'.split(' ');
 const EN='time people today road city light book wind word work new thought warm evening after near important simple morning tomorrow together read write see remember good every air quiet again fast calm question answer window music sun river forest shore field voice meaning start finish hand place friend story world motion joy plan choice step way day night cloud rain life task solution attention memory knowledge idea feeling help result meeting spring summer autumn winter'.split(' ');
