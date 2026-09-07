@@ -58,7 +58,7 @@ CREATE TABLE titsbot.outbox (
 CREATE INDEX outbox_due ON titsbot.outbox(chat_id,next_run) WHERE status='PENDING';
 CREATE TABLE titsbot.processed_updates (update_id bigint PRIMARY KEY,created_at double precision NOT NULL);
 CREATE TABLE titsbot.runtime (key text PRIMARY KEY,value jsonb NOT NULL);
-CREATE TABLE titsbot.rate_limits (key text PRIMARY KEY,window bigint NOT NULL,hits integer NOT NULL);
+CREATE TABLE titsbot.rate_limits (key text PRIMARY KEY,window_start bigint NOT NULL,hits integer NOT NULL);
 CREATE FUNCTION titsbot.protect_user() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 DECLARE k text; oldj jsonb; newj jsonb;
 BEGIN
