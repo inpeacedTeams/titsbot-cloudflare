@@ -1,5 +1,6 @@
 import {Conflict,authenticate,sha,safeEqual,now,json} from './core.mjs';
 import {database} from './db.mjs';
+import {readiness} from './readiness.mjs';
 import {one} from './service.mjs';
 import {telegram,settings,commands} from './remote.mjs';
 export {ChatCoordinator} from './coordinator.mjs';
@@ -31,7 +32,7 @@ export default {
     try {
       const path=new URL(req.url).pathname;
       if(path==='/healthz')return response({ok:true,service:'titsbot',version:'2.0.0'});
-      if(path==='/readyz') {settings(env);const r=await database(env,db=>one(db,"SELECT value FROM titsbot.runtime WHERE key='schema_version'"));if(r?.value!==1)throw new Error('Schema not installed');return response({ok:true,database:true});}
+      if(path==='/readyz') {const r=await readiness(env,database);if(r.status!==200)console.error('readiness_failed',r.body);return response(r.body,r.status);}
       if(path==='/admin/setup') {
         if(req.method!=='POST')throw new Conflict('Use POST',405);
         if(!env.WEBHOOK_SECRET||!safeEqual(req.headers.get('authorization'),`Bearer ${env.WEBHOOK_SECRET}`))throw new Conflict('Unauthorized',401);
