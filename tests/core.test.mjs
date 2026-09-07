@@ -1,0 +1,27 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {createHmac} from 'node:crypto';
+import {rules,validateRules,chatMetrics,chatScore,tier,finalTag,mtMetrics,consistency,similarity,authenticate,validateAnalysis,prompt,safeEqual} from '../src/core.mjs';
+const messages=(times,texts)=>times.map((timestamp,i)=>({message_id:i+1,timestamp,text:texts[i]}));
+test('chat interval example 42.857 WPM',()=>{const [,r]=chatMetrics(messages([8,15],['два слова','здесь ровно пять обычных слов']),0);assert.ok(Math.abs(r[1].message_wpm-42.857142857)<1e-8);});
+test('burst boundary',()=>{const [,r]=chatMetrics(messages([2,7,13],['тёплый вечер','новое утро','яркий день']),0);assert.deepEqual(r.map(x=>x.burst_id),[1,1,2]);});
+test('interval cap/floor',()=>{const [,r]=chatMetrics(messages([0,0,40],['первая запись','вторая заметка','третья история']),0);assert.deepEqual(r.map(x=>x.effective_interval),[1,1,15]);});
+test('Cyrillic duplicates',()=>{const [m,r]=chatMetrics(messages([1,2],['Привет, МИР!','привет мир']),0);assert.equal(m.total_messages,1);assert.equal(r[1].exclusion,'duplicate');});
+test('empty, emoji and insufficient data score zero',()=>{for(const list of [[],messages([2],['😂😂']),messages([2],['два слова'])]){const [m]=chatMetrics(list,0);assert.equal(chatScore(m,100)[0],0);}assert.equal(consistency([0,0]),0);});
+test('oversized message excluded',()=>{const [m,r]=chatMetrics(messages([1],['a '.repeat(1000)]),0);assert.equal(m.total_messages,0);assert.equal(r[0].exclusion,'too_long');});
+test('WPM weight is 70%',()=>{assert.equal(chatScore({insufficient_data:false,median_chat_wpm:140,wpm_consistency:0,word_diversity:0},0)[0],70);});
+test('absolute boundaries',()=>{for(const [s,d]of [[0,1],[9.999,1],[10,2],[70,8],[90,10],[100,10]])assert.equal(tier(s,[])[0],d);});
+test('relative pool begins at five completed peers',()=>{assert.equal(tier(77,[92,81,74,61])[1].mode,'absolute');assert.equal(tier(77,[92,81,74,61,43])[0],7);});
+test('midrank and extremes',()=>{assert.equal(tier(50,[50,50,50,50,50])[0],6);assert.equal(tier(100,[10,20,30,40,50])[0],10);assert.equal(tier(0,[10,20,30,40,50])[0],1);});
+test('19 exact half-step final tags',()=>{const tags=new Set();for(let c=1;c<=10;c++)for(let m=1;m<=10;m++)tags.add(finalTag(c,m)[1]);assert.equal(tags.size,19);assert.deepEqual(finalTag(8,7),[7.5,'D-7.5']);});
+test('MT corrections',()=>{const m=mtMetrics([{kind:'key',key:'x',t:100},{kind:'insert',char:'x',t:101},{kind:'delete',t:200},{kind:'insert',char:'a',t:300}],'abc');assert.equal(m.accuracy,50);assert.equal(m.quality,100);assert.equal(m.errors,1);assert.equal(m.corrections,1);assert.equal(m.wpm,.4);assert.equal(m.raw_wpm,.8);});
+test('MT rejects malformed events, paste, nonfinite, reverse time',()=>{for(const e of [{t:NaN,kind:'delete'},{t:30000,kind:'delete'},{t:1,kind:'insert',char:'paste'},{t:1,kind:'paste'},{t:1,kind:'insert',char:'\n'},null])assert.throws(()=>mtMetrics([e],'abc'));assert.throws(()=>mtMetrics([{t:10,kind:'delete'},{t:9,kind:'delete'}],'abc'));});
+test('MT empty stays zero',()=>assert.equal(mtMetrics([],'abc').score,0));
+test('random prompts have enough text',()=>{assert.equal(prompt().split(' ').length,600);assert.notEqual(prompt(),prompt());});
+test('config refuses protocol changes',()=>{const r=structuredClone(rules);r.chat.weights.wpm=.8;assert.throws(()=>validateRules(r));});
+test('LLM schema is strict',()=>{const value={accuracy:87,quality:82,context_relevance:91,reasoning:'ok'};assert.equal(validateAnalysis(value).accuracy,87);for(const bad of [{...value,wpm:99},{...value,accuracy:101},{...value,accuracy:true},{...value,accuracy:NaN}])assert.throws(()=>validateAnalysis(bad));});
+function sign(extra={}) {const d={user:JSON.stringify({id:42}),auth_date:'1000',start_param:'launch',...extra};const secret=createHmac('sha256','WebAppData').update('123:secret').digest();d.hash=createHmac('sha256',secret).update(Object.keys(d).sort().map(k=>`${k}=${d[k]}`).join('\n')).digest('hex');return new URLSearchParams(d).toString();}
+test('Telegram HMAC and signature field',async()=>{assert.deepEqual(await authenticate(sign(),'123:secret',1001),{user:42,launch:'launch'});assert.equal((await authenticate(sign({signature:'abc'}),'123:secret',1001)).user,42);});
+test('Telegram tampering, duplicate, future and expired rejected',async()=>{for(const raw of [sign().replace('launch','stolen'),sign()+'&user=x',sign({auth_date:'1100'}),sign({auth_date:'1'}),sign({user:'{"id":42,"is_bot":true}'})])await assert.rejects(authenticate(raw,'123:secret',5000));await assert.rejects(authenticate(sign({auth_date:'1100'}),'123:secret',1000));});
+test('constant-time style comparison handles missing and unequal',()=>{assert.equal(safeEqual('a','a'),true);assert.equal(safeEqual('a','aa'),false);assert.equal(safeEqual(null,'a'),false);});
+test('SequenceMatcher-style matching examples',()=>{assert.equal(similarity('abcd','bcde'),.75);assert.equal(similarity('abc','abc'),1);assert.equal(similarity('',''),1);assert.equal(similarity('ab','xy'),0);});
