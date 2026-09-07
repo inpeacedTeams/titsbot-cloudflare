@@ -1,0 +1,17 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {measureChat,typoAccuracy,typoDistance,graphemes} from '../src/chat-method.mjs';
+import {ChatService} from '../src/chat-service.mjs';
+const rows=texts=>texts.map((text,i)=>({text,message_id:i+1,timestamp:i+1}));
+const evidence=(original,correction,extra={})=>({message_id:'1',token_index:0,original,correction,confidence:.99,...extra});
+test('chat v2 fixed-window WPM counts all graphemes, punctuation, spaces, emoji',()=>{const text='да да! 🙂', [m]=measureChat(rows([text]),0);assert.equal(m.total_characters,8);assert.equal(m.chat_wpm,1.6);assert.equal(m.insufficient_data,false);assert.equal(graphemes('👨‍👩‍👧‍👦'),1);});
+test('splitting identical text into messages leaves WPM unchanged',()=>{assert.equal(measureChat(rows(['один два']),0)[0].chat_wpm,measureChat(rows(['один ','два']),0)[0].chat_wpm);});
+test('short repeated replies and previously excluded text now count',()=>{const input=rows(['да','да','да']);input[1].exclusion='duplicate';const [m,detail]=measureChat(input,0);assert.equal(m.total_messages,3);assert.equal(m.chat_wpm,1.2);assert.equal(m.long_repeat_messages,0);assert.ok(detail.every(r=>r.exclusion===null));});
+test('long repeats are flagged but never deducted',()=>{const text='это длинное повторяющееся сообщение с обычными словами '.repeat(3),[m]=measureChat(rows([text,text]),0);assert.equal(m.long_repeat_messages,1);assert.equal(m.total_characters,graphemes(text)*2);});
+test('window is inclusive at start and exclusive at end',()=>{const input=[{text:'a',message_id:1,timestamp:0},{text:'b',message_id:2,timestamp:60}], [m]=measureChat(input,0);assert.equal(m.total_characters,1);assert.equal(m.excluded_messages,1);});
+test('accuracy is calculated from typo edits, not an LLM percentage',()=>{const m=rows(['превет мир']);const a=typoAccuracy(m,{typos:[evidence('превет','привет')]});assert.equal(a.letter_count,9);assert.equal(a.typo_edits,1);assert.ok(Math.abs(a.accuracy-100*8/9)<1e-10);assert.throws(()=>typoAccuracy(m,{accuracy:10}));});
+test('transposition counts once',()=>assert.equal(typoDistance('првиет','привет'),1));
+test('case, е/ё, low-confidence and multiword rewrites do not penalize accuracy',()=>{for(const [a,b,confidence] of [['Привет','привет',1],['елка','ёлка',1],['превет','привет',.7],['привет','добрый день',1]]){assert.equal(typoAccuracy(rows([a]),{typos:[evidence(a,b,{confidence})]}).accuracy,100);}});
+test('invented and duplicate evidence is rejected',()=>{assert.throws(()=>typoAccuracy(rows(['привет']),{typos:[evidence('превет','привет')]}));const e=evidence('превет','привет');assert.throws(()=>typoAccuracy(rows(['превет']),{typos:[e,e]}));});
+test('no detected typos is 100 estimate, no letters is unavailable',()=>{assert.equal(typoAccuracy(rows(['ну да лол']),{typos:[]}).accuracy,100);assert.equal(typoAccuracy(rows(['🙂!']),{typos:[]}).accuracy,null);});
+test('busy timer is returned before creating a second test',async()=>{const calls=[];const s=new ChatService({query:async(sql,args)=>{calls.push(sql);if(sql.includes("status IN ('RESERVED','RUNNING')"))return {rows:[{status:'RUNNING',ended_at:140}]};return {rows:[]};}},-100,100);s.recoverChat=async()=>{};s.freeze=async()=>{};s.user=async()=>({initial_chat_d:null,calibration_completed_at:null});await assert.rejects(s.reserveChat(2),/45 с/);assert.ok(!calls.some(q=>q.startsWith('INSERT INTO titsbot.chat_tests')));});
