@@ -12,7 +12,7 @@ export class Service {
   async reply(key,text,extra={}) {await enqueue(this.db,this.chat,key,'message',{chat_id:this.chat,text,...extra});}
   async rate(user) {
     const key=`api:${this.chat}:${user}`,win=Math.floor(this.time/60);
-    const r=await one(this.db,'INSERT INTO titsbot.rate_limits(key,window,hits) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET window=EXCLUDED.window,hits=CASE WHEN titsbot.rate_limits.window=EXCLUDED.window THEN titsbot.rate_limits.hits+1 ELSE 1 END RETURNING hits',[key,win]);
+    const r=await one(this.db,'INSERT INTO titsbot.rate_limits(key,window_start,hits) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET window_start=EXCLUDED.window_start,hits=CASE WHEN titsbot.rate_limits.window_start=EXCLUDED.window_start THEN titsbot.rate_limits.hits+1 ELSE 1 END RETURNING hits',[key,win]);
     if(r.hits>240)throw new Conflict('Слишком много запросов. Подождите минуту.',429);
   }
   async status(user) {
