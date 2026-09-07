@@ -64,7 +64,7 @@ export default {
       await database(env,async db=>{
         await db.query('DELETE FROM titsbot.launch_tokens WHERE expires_at<extract(epoch from clock_timestamp())-86400');
         await db.query('DELETE FROM titsbot.processed_updates WHERE created_at<extract(epoch from clock_timestamp())-604800');
-        await db.query('DELETE FROM titsbot.rate_limits WHERE window<floor(extract(epoch from clock_timestamp())/60)-5');
+        await db.query('DELETE FROM titsbot.rate_limits WHERE window_start<floor(extract(epoch from clock_timestamp())/60)-5');
       });
     }catch(e){console.error('cron_failed',{kind:e.name});}
   }
