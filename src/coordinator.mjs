@@ -1,8 +1,9 @@
 import {Conflict,now,json,uid} from './core.mjs';
 import {database,transaction} from './db.mjs';
 import {one} from './service.mjs';
-import {telegram,preflight,assignTag,analyze,settings} from './remote.mjs';
+import {telegram,preflight,assignTag,settings} from './remote.mjs';
 import {response,error} from './index.mjs';
+import {analyzeChat as analyze} from './chat-analysis.mjs';
 export class ChatCoordinator {
   constructor(ctx,env){this.ctx=ctx;this.env=env;}
   async arm(time=Date.now()+1000){const old=await this.ctx.storage.getAlarm();if(old===null||old>time)await this.ctx.storage.setAlarm(time);}
@@ -54,7 +55,7 @@ export class ChatCoordinator {
     const chat=await this.ctx.storage.get('chat');if(!chat||!settings(this.env).includes(chat))return;
     await this.ctx.storage.setAlarm(Date.now()+120000);
     try {
-      await transaction(this.env,chat,async s=>{await s.expire();await s.freeze();});
+      await transaction(this.env,chat,async s=>{await s.recoverChat();await s.expire();await s.freeze();});
       const job=await transaction(this.env,chat,async s=>{
         const pace=await one(s.db,'SELECT value FROM titsbot.runtime WHERE key=$1',[`send:${chat}`]);
         const j=await one(s.db,"SELECT * FROM titsbot.outbox WHERE chat_id=$1 AND status='PENDING' AND next_run<=$2 AND lease_until<=$2 ORDER BY next_run,job_key LIMIT 1 FOR UPDATE SKIP LOCKED",[chat,s.time]);if(!j)return null;
@@ -65,9 +66,12 @@ export class ChatCoordinator {
       if(job)await this.deliver(chat,job);
       const next=await database(this.env,db=>one(db,`SELECT min(t) AS t FROM (
         SELECT ended_at+5 AS t FROM titsbot.chat_tests WHERE chat_id=$1 AND status='RUNNING'
+        UNION ALL SELECT reserved_until FROM titsbot.chat_tests WHERE chat_id=$1 AND status='RESERVED'
+        UNION ALL SELECT analysis_deadline FROM titsbot.chat_tests WHERE chat_id=$1 AND status='ANALYZING'
         UNION ALL SELECT ended_at+5.1 FROM titsbot.mt_attempts WHERE chat_id=$1 AND status='RUNNING'
         UNION ALL SELECT greatest(next_run,lease_until) FROM titsbot.outbox WHERE chat_id=$1 AND status='PENDING'
       ) q`,[chat]));
+      // Keep a bounded idle watchdog; cron is a second recovery layer.
       await this.ctx.storage.setAlarm(next?.t!=null?Math.max(Date.now()+500,Number(next.t)*1000):Date.now()+60000);
     }catch(e){console.error('alarm_failed',{chat,kind:e.name});await this.ctx.storage.setAlarm(Date.now()+15000);}
   }
@@ -95,7 +99,7 @@ export class ChatCoordinator {
         const delay=Math.max(Math.min(3600,5*2**Math.min(j.attempts+1,10)),e.retryAfter||0);
         await s.db.query('UPDATE titsbot.outbox SET attempts=attempts+1,next_run=$1,lease_token=NULL,lease_until=0,last_error=$2 WHERE job_key=$3 AND lease_token=$4',[s.time+delay,e instanceof Conflict?'PermissionOrMembership':e.name,j.job_key,j.lease_token]);
         if(j.kind==='tag')await s.db.query("UPDATE titsbot.users SET tag_status='PENDING' WHERE chat_id=$1 AND user_id=$2",[chat,p.user_id]);
-        if(j.attempts===0&&['analyze','tag'].includes(j.kind))await s.reply(`delay:${j.job_key}`,j.kind==='analyze'?'Сервис анализа временно недоступен. Текст сохранён; повторный Chat Test не нужен.':`D участника ${p.user_id} сохранён, но тег не назначен. Проверьте членство и право бота управлять тегами. Повтор автоматический.`);
+        if(j.attempts===0&&['analyze','tag'].includes(j.kind))await s.reply(`delay:${j.job_key}`,j.kind==='analyze'?'Проверка опечаток временно недоступна. Текст и WPM сохранены; выполняю ограниченные повторы. Повторно писать тест не нужно.':`D участника ${p.user_id} сохранён, но тег не назначен. Проверьте членство и право бота управлять тегами. Повтор автоматический.`);
       });console.error('delivery_retry',{kind:j.kind,error:e.name});
     }
   }

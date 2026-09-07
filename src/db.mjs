@@ -1,5 +1,7 @@
 import pg from 'pg';
-import {Service,one} from './service.mjs';
+import {now} from './core.mjs';
+import {one} from './service.mjs';
+import {ChatService as Service} from './chat-service.mjs';
 export async function database(env,fn) {
   const connectionString=env.DATABASE_URL||env.HYPERDRIVE?.connectionString;
   if(!connectionString)throw new Error('Database binding missing');

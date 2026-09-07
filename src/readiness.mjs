@@ -28,6 +28,7 @@ export async function readiness(env,connect) {
       const result=await db.query("SELECT value FROM titsbot.runtime WHERE key='schema_version'");
       if(result.rows[0]?.value!==1)return fail(stage,'SCHEMA_NOT_INSTALLED','Проверьте, что миграция полностью выполнена именно в базе, подключённой к Hyperdrive.');
       await db.query('SELECT window_start FROM titsbot.rate_limits LIMIT 0');
+      await db.query('SELECT reserved_until,analysis_deadline FROM titsbot.chat_tests LIMIT 0');
       return {status:200,body:{ok:true,database:true}};
     });
   }catch(e) {
@@ -37,7 +38,7 @@ export async function readiness(env,connect) {
       '42501':['DB_PERMISSION_DENIED','Проверьте GRANT и RLS-политики из scripts/create-db-role.sql.'],
       '42P01':['DB_TABLE_MISSING','В подключённой базе отсутствует нужная таблица. Проверьте выполнение миграции.'],
       '3F000':['DB_SCHEMA_MISSING','В подключённой базе отсутствует схема titsbot. Проверьте миграцию.'],
-      '42703':['DB_COLUMN_MISSING','Проверьте, что столбец rate_limits называется window_start и код обновлён.'],
+      '42703':['DB_COLUMN_MISSING','Выполните миграцию 002_chat_v2.sql; также проверьте rate_limits.window_start.'],
       '3D000':['DB_DATABASE_MISSING','Проверьте имя базы в Hyperdrive; обычно это postgres.'],
       '53300':['DB_TOO_MANY_CONNECTIONS','Достигнут лимит соединений PostgreSQL. Проверьте нагрузку и пул.'],
       '57014':['DB_QUERY_TIMEOUT','Запрос к базе превысил допустимое время.'],
