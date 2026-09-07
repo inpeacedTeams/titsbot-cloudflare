@@ -1,0 +1,6 @@
+# Local only. Never commit actual secrets.
+BOT_TOKEN=replace
+WEBHOOK_SECRET=replace_with_random_hex
+LLM_API_KEY=replace
+# Local database, migrations required. Remote deployment uses Hyperdrive instead.
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/titsbot_test

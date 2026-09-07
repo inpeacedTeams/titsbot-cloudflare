@@ -1,0 +1,23 @@
+{
+  "version": "1.0.0",
+  "chat": {
+    "duration": 60, "burst_gap": 5, "interval_cap": 15, "interval_floor": 1,
+    "message_wpm_cap": 250, "wpm_max": 140, "wpm_source": "median_chat_wpm",
+    "max_message_chars": 800, "max_messages": 120, "max_total_chars": 16000,
+    "duplicate_similarity": 0.92, "min_messages": 3, "min_words": 10,
+    "ingest_grace": 5, "context_enabled": false,
+    "weights": {"wpm": 0.7, "accuracy": 0.1, "consistency": 0.1, "diversity": 0.1}
+  },
+  "mt": {
+    "duration": 30, "attempts": 3, "countdown": 3, "wpm_max": 160,
+    "grace": 5, "max_event_lag_ms": 5000, "max_events": 12000,
+    "max_batch_events": 300, "bin_seconds": 5, "language": "ru",
+    "weights": {"wpm": 0.7, "accuracy": 0.1, "consistency": 0.1, "quality": 0.1}
+  },
+  "calibration": {
+    "min_pool": 5, "score_min": 0, "score_max": 100,
+    "absolute_lower_bounds": [0,10,20,30,40,50,60,70,80,90],
+    "percentile_lower_bounds": [0,10,20,30,40,50,60,70,80,90],
+    "tie_policy": "midrank", "display_decimals": 2, "display_rounding": "half_up"
+  }
+}
