@@ -1,146 +1,55 @@
 'use strict';
-const $ = id => document.getElementById(id);
-const tg=window.Telegram?.WebApp;
-let initData=tg?.initData || '', run=null, startKey=null, cache=null, retryAction=null;
-let pending=[],seq=0,flushPromise=null,stopAt=0,startedAt=0,raf=null,typed='',inserted=0,correctInserted=0;
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const $=id=>document.getElementById(id),tg=window.Telegram?.WebApp;
+const initData=tg?.initData||'',sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let run=null,cache=null,startKey=null,retryAction=null,starting=false,view='test',selected=null,initialized=false;
+let pending=[],seq=0,flushPromise=null,startedAt=0,stopAt=0,raf=0,typed='',inserted=0,correctInserted=0,chars=[],promptChars=[],scrollY=0,chartSeries=[],chartIndex=null,refreshing=false;
+const fmt=(n,d=0)=>Number.isFinite(Number(n))?Number(n).toFixed(d):'—';
 function notice(text,error=false){$('notice').textContent=text;$('notice').classList.toggle('error',error);}
-async function api(path,data={}){
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4000);
-  try{
-    const response=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:initData,...data}),signal:controller.signal});
-    const body=await response.json();if(!response.ok){const e=new Error(body.error||'Ошибка сервера');e.status=response.status;throw e;}return body;
-  }finally{clearTimeout(timer);}
-}
 function retryWith(fn){retryAction=fn;$('retry').hidden=false;}
-$('retry').onclick=async()=>{$('retry').hidden=true;try{await retryAction();}catch(e){notice(e.message,true);$('retry').hidden=false;}};
-function showStatus(s){
-  document.body.classList.toggle('completed',!!s.mt_d);
-  cache=s;$('wpm-weight').textContent=Math.round(s.mt_wpm_weight*100)+'%';$('chat-state').textContent=s.chat_d?`D-${s.chat_d} · готово`:'Ожидает /getDchat';
-  $('mt-state').textContent=s.mt_d?`D-${s.mt_d} · готово`:`${s.attempts.filter(a=>a.status!=='RUNNING').length} из 3 попыток`;
-  $('final-tier').textContent=s.tag||'—';$('tier-note').textContent=s.tag?'Зафиксирован навсегда':'После двух тестов';
-  $('tag-state').textContent=s.tag_status==='ASSIGNED'?'Тег назначен':s.tag?'Тег в очереди':'Ожидает результатов';
-  const scores=s.attempts.filter(a=>a.status!=='RUNNING'),best=scores.length?Math.max(...scores.map(a=>a.score)):null;
-  $('attempts').replaceChildren(...[0,1,2].map(i=>{
-    const a=s.attempts[i],el=document.createElement('article'),n=document.createElement('p'),v=document.createElement('strong'),sub=document.createElement('span');
-    n.textContent=`0${i+1}`;v.textContent=a&&a.status!=='RUNNING'?Number(a.score).toFixed(1):'—';
-    sub.textContent=!a?'Ещё не начата':a.status==='RUNNING'?'Идёт попытка':a.status==='DONE'?`${a.metrics.wpm.toFixed(1)} WPM · ${a.metrics.accuracy.toFixed(0)}%`:'0 · попытка потрачена';
-    if(a&&a.status!=='RUNNING'&&a.score===best)el.classList.add('best');el.append(n,v,sub);return el;
-  }));
-  const active=s.attempts.find(a=>a.status==='RUNNING');
-  if(!run){
-    $('start').disabled=!!active||s.attempts.length>=3||!!s.mt_d;
-    $('start').textContent=s.mt_d?'MT завершён':active?'Попытка уже идёт':s.attempts.length>=3?'Попытки использованы':`Начать попытку ${s.attempts.length+1} ↗`;
-    $('attempt-label').textContent=`ПОПЫТКА ${Math.min(3,s.attempts.length+1)} / 3`;
-    if(active)notice('Активная попытка открыта в другом окне или прервана перезагрузкой. Новая станет доступна после её окончания.');
-    else if(s.mt_d)notice(s.final_d?'Оба теста завершены. D больше не изменится.':'MT завершён. Пройди /getDchat в группе, чтобы получить Final D.');
-    else notice('Готово. После нажатия будет отсчёт 3–2–1.');
-  }
+async function api(path,data={}){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4000);try{const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:initData,...data}),signal:controller.signal});const body=await r.json();if(!r.ok){const e=new Error(body.error||'Ошибка сервера');e.status=r.status;throw e;}return body;}catch(e){if(e.name==='AbortError')throw new Error('Сервер не ответил вовремя. Повтори запрос.');throw e;}finally{clearTimeout(timer);}}
+$('retry').onclick=async()=>{const fn=retryAction;if(!fn)return;$('retry').hidden=true;try{await fn();}catch(e){notice(e.message,true);retryWith(fn);}};
+$('help-toggle').onclick=()=>{if(run)return;const open=$('help-panel').hidden;$('help-panel').hidden=!open;$('help-toggle').setAttribute('aria-expanded',String(open));};
+const doneAttempts=()=>cache?.attempts.filter(a=>a.status!=='RUNNING')||[];
+const canStart=()=>!!cache&&!run&&!starting&&!cache.mt_d&&cache.attempts.length<3&&!cache.attempts.some(a=>a.status==='RUNNING');
+function idlePrompt(){const text='время человек сегодня дорога город свет книга ветер слово работа новая мысль тёплый вечер после рядом важно просто можно утром завтра вместе читать писать видеть помнить хороший каждый воздух тихо снова быстро спокойно вопрос ответ окно музыка солнце';$('words').textContent=text;$('words').style.transform='none';$('caret').hidden=true;}
+function renderAttempts(){const completed=doneAttempts(),best=completed.length?Math.max(...completed.map(a=>Number(a.score))):null;$('attempts').replaceChildren(...[0,1,2].map(i=>{const a=cache?.attempts[i],b=document.createElement('button');b.className='attempt';b.disabled=!a||a.status==='RUNNING'||!!run;b.classList.toggle('selected',view==='result'&&a?.attempt_id===selected);b.setAttribute('aria-label',`Попытка ${i+1}${a?', '+(a.status==='DONE'?'результат':'потрачена'):': ещё не начата'}`);const head=document.createElement('span');head.className='attempt-head';const n=document.createElement('span');n.textContent=`0${i+1}`;head.append(n);if(a&&a.status!=='RUNNING'&&Number(a.score)===best){const mark=document.createElement('span');mark.className='best';mark.textContent='лучший';head.append(mark);}const score=document.createElement('strong'),sub=document.createElement('small');score.textContent=a&&a.status!=='RUNNING'?fmt(a.score,1):'—';sub.textContent=!a?'ещё не начата':a.status==='RUNNING'?'идёт тест':a.status==='DONE'?`${fmt(a.metrics.wpm)} wpm · ${fmt(a.metrics.accuracy)}%`:'попытка потрачена';b.append(head,score,sub);b.onclick=()=>{selected=a.attempt_id;view='result';renderView();renderAttempts();};return b;}));}
+function renderView(){if(run)return;$('test-view').hidden=view==='result';$('result-view').hidden=view!=='result';if(view==='result'){const a=doneAttempts().find(a=>a.attempt_id===selected)||doneAttempts().at(-1);if(a){selected=a.attempt_id;renderResult(a);return;}view='test';$('test-view').hidden=false;$('result-view').hidden=true;}
+  idlePrompt();$('start').hidden=false;$('countdown').hidden=true;$('refocus').hidden=true;$('typing').disabled=true;$('start').disabled=!canStart();$('timer').textContent='30';$('timer-unit').textContent='s';$('live-wpm').textContent='—';$('live-accuracy').textContent='—';
+  const active=cache?.attempts.some(a=>a.status==='RUNNING');$('start-label').textContent=!initData?'открой через Telegram':!cache?'подключение…':active?'попытка уже идёт':cache.mt_d||cache.attempts.length>=3?'тест завершён':'нажми сюда, чтобы начать';$('start-hint').textContent=active?'Дождись завершения активной попытки':cache?.mt_d?'Результаты доступны ниже':'после клика — отсчёт 3–2–1';
 }
-async function refresh(){showStatus(await api('status'));}
-function drawPrompt(){
-  if(!run)return;
-  const fragment=document.createDocumentFragment();
-  for(let i=Math.max(0,typed.length-80);i<Math.min(run.prompt.length,typed.length+550);i++){
-    const span=document.createElement('span');span.textContent=run.prompt[i];
-    if(i<typed.length)span.className=typed[i]===run.prompt[i]?'correct':'wrong';else if(i===typed.length)span.className='cursor';
-    fragment.append(span);
-  }
-  $('prompt').replaceChildren(fragment);$('prompt').classList.remove('idle');
-  const cursor=$('prompt').querySelector('.cursor');
-  if(cursor)$('prompt').scrollTop=Math.max(0,cursor.offsetTop-$('prompt').offsetTop-70);
+function showStatus(s){cache=s;$('attempt-label').textContent=`попытка ${Math.min(3,s.attempts.length+1)} / 3`;$('chat-state').textContent=s.chat_d?`D-${s.chat_d}`:'ожидает';$('mt-state').textContent=s.mt_d?`D-${s.mt_d}`:`${doneAttempts().length} / 3`;$('final-tier').textContent=s.tag||'—';$('tag-state').textContent=s.tag_status==='ASSIGNED'?'Тег назначен · итог зафиксирован':s.tag?'Тег в очереди на назначение':s.mt_d?'Пройди /getdchat в группе для Final D':'Итог после Chat и MT';$('weight-note').textContent=`вес скорости ${Math.round(s.mt_wpm_weight*100)}% · серверный подсчёт`;
+  if(!initialized){initialized=true;if(doneAttempts().length){selected=doneAttempts().at(-1).attempt_id;view='result';}notice(s.attempts.some(a=>a.status==='RUNNING')?'Активная попытка не возобновляется после перезагрузки. Дождись её окончания.':'');}renderView();renderAttempts();}
+async function refresh(){if(refreshing||run||starting)return;refreshing=true;try{const s=await api('status');if(!run&&!starting)showStatus(s);}finally{refreshing=false;}}
+$('next').onclick=()=>{if(!canStart())return;view='test';renderView();renderAttempts();$('start').focus();notice('Нажми на текст, когда будешь готов.');};
+function renderResult(a){const m=a.metrics||{};$('result-title').textContent=`попытка ${a.ordinal} / 3`;$('result-state').textContent=a.status==='DONE'?'проверено сервером':'попытка потрачена · score 0';for(const [id,v]of Object.entries({'result-wpm':fmt(m.wpm),'result-accuracy':fmt(m.accuracy)+'%','result-raw':fmt(m.raw_wpm),'result-consistency':fmt(m.consistency)+'%','result-characters':`${fmt(m.correct_characters)}/${fmt(m.inserted_characters)}`,'result-errors':`${fmt(m.errors)}/${fmt(m.corrections)}`,'result-duration':`${fmt(m.duration||30)} s`,'result-score':fmt(a.score,1)}))$(id).textContent=v;
+  $('next').hidden=!canStart();$('result-note').textContent=canStart()?'Переход к следующей попытке ещё не запускает таймер.':cache.mt_d?`MT D-${cache.mt_d} · лучший результат зафиксирован.`:'Все три попытки использованы.';
+  chartSeries=Array.isArray(m.timeline)?m.timeline.filter(p=>['second','wpm','raw_wpm','errors'].every(k=>Number.isFinite(p[k]))):[];chartIndex=null;$('chart').hidden=!chartSeries.length;$('chart-empty').hidden=!!chartSeries.length;$('chart-data').hidden=!chartSeries.length;$('chart-readout').textContent='WPM и raw — средняя скорость с начала теста.';
+  $('chart-rows').replaceChildren(...chartSeries.map(p=>{const tr=document.createElement('tr');for(const v of [p.second,fmt(p.wpm,1),fmt(p.raw_wpm,1),p.errors]){const td=document.createElement('td');td.textContent=v;tr.append(td);}return tr;}));$('chart').setAttribute('aria-label',`Попытка ${a.ordinal}: ${fmt(m.wpm,1)} WPM, raw ${fmt(m.raw_wpm,1)}, точность ${fmt(m.accuracy,1)}%. Посекундные значения в таблице ниже.`);requestAnimationFrame(drawChart);
 }
+function drawChart(){if(!chartSeries.length||$('result-view').hidden)return;const canvas=$('chart'),rect=canvas.getBoundingClientRect(),w=rect.width,h=rect.height;if(w<1||h<1)return;const dpr=Math.min(window.devicePixelRatio||1,3);canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);const c=canvas.getContext('2d');c.scale(dpr,dpr);const left=35,right=w-12,top=16,bottom=h-68,errorTop=h-43,errorBottom=h-24,max=Math.max(20,Math.ceil(Math.max(...chartSeries.flatMap(p=>[p.wpm,p.raw_wpm]))/20)*20),last=chartSeries.at(-1).second,x=s=>left+(s-1)/Math.max(1,last-1)*(right-left),y=v=>bottom-v/max*(bottom-top);c.font='11px Consolas, monospace';c.lineWidth=1;
+  for(let i=0;i<=4;i++){const v=max*i/4,yy=y(v);c.strokeStyle='#484b4e';c.beginPath();c.moveTo(left,yy);c.lineTo(right,yy);c.stroke();c.fillStyle='#aaa9a2';c.textAlign='right';c.fillText(fmt(v),left-8,yy+4);}c.fillStyle='#aaa9a2';c.textAlign='left';c.fillText('wpm',left,10);
+  for(const [key,color]of [['raw_wpm','#aaa9a2'],['wpm','#e2b714']]){c.strokeStyle=color;c.fillStyle=color;c.lineWidth=2;c.beginPath();chartSeries.forEach((p,i)=>{if(i)c.lineTo(x(p.second),y(p[key]));else c.moveTo(x(p.second),y(p[key]));});c.stroke();for(const p of chartSeries){c.beginPath();c.arc(x(p.second),y(p[key]),1.8,0,Math.PI*2);c.fill();}}
+  const maxErrors=Math.max(1,...chartSeries.map(p=>p.errors)),bar=Math.max(2,Math.min(8,(right-left)/chartSeries.length*.55));c.fillStyle='#f0808b';for(const p of chartSeries)if(p.errors)c.fillRect(x(p.second)-bar/2,errorBottom-(p.errors/maxErrors)*(errorBottom-errorTop),bar,p.errors/maxErrors*(errorBottom-errorTop));c.fillStyle='#aaa9a2';c.textAlign='right';c.fillText(String(maxErrors),left-8,errorTop+6);c.fillText('0',left-8,errorBottom+3);for(const second of [1,10,20,30].filter(s=>s<=last)){c.textAlign=second===1?'left':second===last?'right':'center';c.fillText(second+'s',x(second),h-4);}
+  if(chartIndex!==null){const p=chartSeries[chartIndex];c.strokeStyle='#777a7d';c.lineWidth=1;c.beginPath();c.moveTo(x(p.second),top);c.lineTo(x(p.second),errorBottom);c.stroke();$('chart-readout').textContent=`${p.second}s · wpm ${fmt(p.wpm,1)} · raw ${fmt(p.raw_wpm,1)} · ошибок ${p.errors}`;}
+}
+$('chart').addEventListener('pointermove',e=>{if(!chartSeries.length)return;const r=$('chart').getBoundingClientRect();chartIndex=Math.max(0,Math.min(chartSeries.length-1,Math.round((e.clientX-r.left-35)/(r.width-47)*(chartSeries.length-1))));drawChart();});$('chart').addEventListener('pointerleave',()=>{chartIndex=null;$('chart-readout').textContent='WPM и raw — средняя скорость с начала теста.';drawChart();});
+function buildPrompt(){chars=[];promptChars=[...run.prompt];scrollY=0;const f=document.createDocumentFragment();for(const word of run.prompt.match(/\S+\s*|\s+/g)||[]){const wrap=document.createElement('span');wrap.className='word';for(const ch of word){const el=document.createElement('span');el.className='char'+(ch===' '?' space':'');el.textContent=ch;chars.push(el);wrap.append(el);}f.append(wrap);}$('words').replaceChildren(f);$('words').style.transform='none';$('prompt-accessible').textContent=run.prompt;placeCaret();}
+function placeCaret(){if(!run)return;const el=chars[[...typed].length]||chars.at(-1);if(!el)return;const zone=$('typing-zone').getBoundingClientRect(),wordRect=$('words').getBoundingClientRect(),r=el.getBoundingClientRect(),line=parseFloat(getComputedStyle($('words')).lineHeight),naturalTop=r.top-wordRect.top;scrollY=Math.max(0,Math.floor(naturalTop/line)*line-line);$('words').style.transform=`translateY(${-scrollY}px)`;$('caret').style.left=`${Math.min(zone.width-3,Math.max(0,r.left-zone.left))}px`;$('caret').style.top=`${naturalTop-scrollY+2}px`;$('caret').hidden=false;}
+new ResizeObserver(()=>{placeCaret();drawChart();}).observe($('typing-zone'));window.addEventListener('resize',drawChart);
 function add(event){const t=performance.now()-startedAt;if(t>=0&&t<30000)pending.push({t:Math.round(t*100)/100,...event});}
-async function flush(){
-  if(flushPromise)return flushPromise;
-  flushPromise=(async()=>{
-    while(pending.length){
-      const events=pending.slice(0,250),thisSeq=seq;let done=false;
-      for(let retry=0;retry<3&&!done;retry++){
-        try{await api('mt/events',{attempt_id:run.attempt_id,seq:thisSeq,events});done=true;}
-        catch(e){if(e.status&&e.status<500)throw e;if(retry===2)throw e;await sleep(150);}
-      }
-      pending.splice(0,events.length);seq++;
-    }
-  })();
-  try{await flushPromise;}finally{flushPromise=null;}
-}
-async function endTest(){
-  if(!run||run.ending)return;run.ending=true;$('typing').disabled=true;cancelAnimationFrame(raf);
-  $('timer').textContent='0';$('timer-unit').textContent='секунд';notice('Сохраняем события и проверяем результат…');
-  const finish=async()=>{
-    await flush();
-    // Finish cannot shorten the server-authoritative window.
-    let result;
-    for(let i=0;i<6;i++){
-      try{result=await api('mt/finish',{attempt_id:run.attempt_id});break;}
-      catch(e){if(i<5&&e.message.includes('ещё не истекли'))await sleep(150);else throw e;}
-    }
-    run=null;document.body.classList.remove('running');startKey=null;await refresh();
-    notice(`Сохранено: ${result.wpm.toFixed(1)} WPM · Accuracy ${result.accuracy.toFixed(1)}% · Score ${result.score.toFixed(1)}. Итог рассчитывает сервер.`);
-  };
-  try{await finish();}catch(e){notice(e.message,true);retryWith(finish);}
-}
-async function abortTest(reason){
-  if(!run||run.ending)return;run.ending=true;$('typing').disabled=true;cancelAnimationFrame(raf);
-  try{await api('mt/abort',{attempt_id:run.attempt_id});}catch(e){/* server expires this consumed attempt independently */}
-  if(flushPromise)try{await flushPromise;}catch(e){}
-  run=null;pending=[];startKey=null;document.body.classList.remove('running');notice(reason+' Попытка потрачена, Score = 0.',true);
-  try{await refresh();notice(reason+' Попытка потрачена, Score = 0.',true);}catch(e){retryWith(refresh);}
-}
-function tick(){
-  if(!run||run.ending)return;
-  const now=performance.now();
-  if(now<startedAt){$('timer').textContent=Math.ceil((startedAt-now)/1000);$('timer-unit').textContent='до старта';}
-  else{
-    if($('typing').disabled){$('typing').disabled=false;$('typing').focus();notice('GO. Печатай текст выше.');}
-    $('timer').textContent=Math.max(0,Math.ceil((stopAt-now)/1000));$('timer-unit').textContent='секунд';
-    const correct=[...typed].filter((c,i)=>c===run.prompt[i]).length;
-    $('live-wpm').textContent=(correct/5/Math.max((now-startedAt)/60000,1/60)).toFixed(0);
-    $('live-accuracy').textContent=inserted?`${(correctInserted/inserted*100).toFixed(0)}%`:'—';
-    if(now>=stopAt){endTest();return;}
-  }
-  raf=requestAnimationFrame(tick);
-}
-$('start').onclick=async()=>{
-  $('start').disabled=true;
-  startKey=startKey||crypto.randomUUID();
-  const start=async()=>{
-    const before=performance.now();const response=await api('mt/start',{request_id:startKey});const after=performance.now();
-    if(response.status!=='RUNNING'){startKey=null;await refresh();return;}
-    run=response;pending=[];seq=0;typed='';inserted=0;correctInserted=0;$('typing').value='';$('typing').disabled=true;
-    startedAt=(before+after)/2+(run.started_at-run.server_now)*1000;stopAt=startedAt+30000;
-    document.body.classList.add('running');$('test-title').textContent='Печатай в своём темпе';$('attempt-label').textContent=`ПОПЫТКА ${run.ordinal} / 3`;
-    drawPrompt();$('retry').hidden=true;tick();
-  };
-  try{await start();}catch(e){notice(e.message,true);retryWith(start);}
-};
-$('typing').addEventListener('keydown',e=>{
-  if(!run||run.ending||performance.now()<startedAt||performance.now()>=stopAt)return;
-  if(e.ctrlKey||e.metaKey||e.altKey||['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Delete','Enter','Tab'].includes(e.key)){e.preventDefault();return;}
-  add({kind:'key',key:e.key.slice(0,32)});
-});
-$('typing').addEventListener('beforeinput',e=>{
-  if(!run||run.ending)return;
-  if(!['insertText','deleteContentBackward'].includes(e.inputType)||e.isComposing||(e.data&&[...e.data].length!==1)){
-    e.preventDefault();abortTest('Вставка, автозамена или IME не поддерживаются.');
-  }
-});
-$('typing').addEventListener('input',()=>{
-  if(!run||run.ending)return;
-  if(performance.now()<startedAt||performance.now()>=stopAt){$('typing').value=typed;return;}
-  const value=$('typing').value;
-  if(value.startsWith(typed)&&[...value].length===[...typed].length+1){
-    const ch=[...value].at(-1);add({kind:'insert',char:ch});inserted++;correctInserted+=Number(ch===run.prompt[typed.length]);
-  }else if(typed.startsWith(value)&&[...value].length===[...typed].length-1){add({kind:'delete'});}
-  else{$('typing').value=typed;abortTest('Обнаружен неподдерживаемый ввод.');return;}
-  typed=value;drawPrompt();
-});
-for(const type of ['paste','drop'])$('typing').addEventListener(type,e=>{e.preventDefault();abortTest('Вставка текста запрещена.');});
-$('typing').addEventListener('select',()=>{if(run)$('typing').setSelectionRange($('typing').value.length,$('typing').value.length);});
+async function flush(){if(flushPromise)return flushPromise;const current=run;if(!current)return;flushPromise=(async()=>{while(pending.length){const events=pending.slice(0,250),thisSeq=seq;for(let retry=0;;retry++){try{await api('mt/events',{attempt_id:current.attempt_id,seq:thisSeq,events});break;}catch(e){if(e.status&&e.status<500||retry>=2)throw e;await sleep(150);}}pending.splice(0,events.length);seq++;}})();try{await flushPromise;}finally{flushPromise=null;}}
+function leaveRun(){run=null;starting=false;startKey=null;document.body.classList.remove('running');$('typing').disabled=true;$('typing').blur();$('caret').hidden=true;$('refocus').hidden=true;$('countdown').hidden=true;$('help-toggle').disabled=false;}
+async function endTest(){if(!run||run.ending)return;run.ending=true;$('typing').disabled=true;cancelAnimationFrame(raf);$('timer').textContent='0';notice('Сохраняем события и проверяем результат…');const attemptId=run.attempt_id;const finish=async()=>{await flush();let result;for(let i=0;i<6;i++){try{result=await api('mt/finish',{attempt_id:attemptId});break;}catch(e){if(i<5&&e.message.includes('ещё не истекли'))await sleep(150);else throw e;}}selected=attemptId;view='result';leaveRun();await refresh();notice(`Сохранено · ${fmt(result.wpm,1)} WPM · score ${fmt(result.score,1)}`);};try{await finish();}catch(e){notice(e.message,true);retryWith(finish);}}
+async function abortTest(reason){if(!run||run.ending)return;run.ending=true;$('typing').disabled=true;cancelAnimationFrame(raf);const id=run.attempt_id;try{await api('mt/abort',{attempt_id:id});}catch{}if(flushPromise)try{await flushPromise;}catch{}pending=[];selected=id;view='result';leaveRun();try{await refresh();}catch{retryWith(refresh);}notice(reason+' Попытка потрачена, score = 0.',true);}
+function tick(){if(!run||run.ending)return;const now=performance.now();if(now<startedAt){$('countdown').hidden=false;$('countdown-value').textContent=Math.ceil((startedAt-now)/1000);$('timer-unit').textContent='до старта';}else{$('countdown').hidden=true;$('timer-unit').textContent='s';$('timer').textContent=Math.max(0,Math.ceil((stopAt-now)/1000));const correct=[...typed].filter((ch,i)=>ch===promptChars[i]).length;$('live-wpm').textContent=fmt(correct/5/Math.max((now-startedAt)/60000,1/60));$('live-accuracy').textContent=inserted?fmt(correctInserted/inserted*100)+'%':'—';if(now>=stopAt){endTest();return;}}raf=requestAnimationFrame(tick);}
+$('start').onclick=async()=>{if(!canStart())return;starting=true;$('start').disabled=true;$('typing').disabled=false;$('typing').focus();startKey=startKey||crypto.randomUUID();const start=async()=>{starting=true;notice('Подготавливаем попытку…');const before=performance.now(),response=await api('mt/start',{request_id:startKey}),after=performance.now();if(response.status!=='RUNNING'){starting=false;startKey=null;await refresh();return;}run=response;starting=false;pending=[];seq=0;typed='';inserted=0;correctInserted=0;$('typing').value='';$('typing').disabled=false;startedAt=(before+after)/2+(run.started_at-run.server_now)*1000;stopAt=startedAt+30000;document.body.classList.add('running');$('help-panel').hidden=true;$('help-toggle').disabled=true;$('help-toggle').setAttribute('aria-expanded','false');$('start').hidden=true;$('retry').hidden=true;$('attempt-label').textContent=`попытка ${run.ordinal} / 3`;$('language').textContent=/[а-яё]/i.test(run.prompt)?'русский':'english';buildPrompt();$('typing').focus();notice('Печатай после отсчёта. Таймер не останавливается.');tick();};try{await start();}catch(e){starting=false;$('typing').disabled=true;notice(e.message,true);retryWith(start);}};
+$('refocus').onclick=()=>{$('typing').focus();};$('typing').addEventListener('focus',()=>{$('refocus').hidden=true;});$('typing').addEventListener('blur',()=>{if(run&&!run.ending)$('refocus').hidden=false;});
+$('typing').addEventListener('keydown',e=>{if(!run||run.ending||performance.now()<startedAt||performance.now()>=stopAt){e.preventDefault();return;}if(e.key==='Tab'){return;}if(e.ctrlKey||e.metaKey||e.altKey||['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Delete','Enter'].includes(e.key)){e.preventDefault();return;}add({kind:'key',key:e.key.slice(0,32)});});
+$('typing').addEventListener('beforeinput',e=>{if(!run||run.ending||performance.now()<startedAt||performance.now()>=stopAt){e.preventDefault();return;}if(!['insertText','deleteContentBackward'].includes(e.inputType)||e.isComposing||(e.data&&[...e.data].length!==1)){e.preventDefault();abortTest('Вставка, автозамена или IME не поддерживаются.');}});
+$('typing').addEventListener('input',()=>{if(!run||run.ending||performance.now()<startedAt||performance.now()>=stopAt){$('typing').value=typed;return;}const value=$('typing').value,oldChars=[...typed],newChars=[...value],target=promptChars;if(value.startsWith(typed)&&newChars.length===oldChars.length+1){if(oldChars.length>=target.length){$('typing').value=typed;return;}const ch=newChars.at(-1);add({kind:'insert',char:ch});inserted++;correctInserted+=Number(ch===target[oldChars.length]);const el=chars[oldChars.length];el.classList.add(ch===target[oldChars.length]?'correct':'wrong');}else if(typed.startsWith(value)&&newChars.length===oldChars.length-1){add({kind:'delete'});chars[newChars.length].classList.remove('correct','wrong');}else{$('typing').value=typed;abortTest('Обнаружен неподдерживаемый ввод.');return;}typed=value;placeCaret();});
+for(const type of ['paste','drop'])$('typing').addEventListener(type,e=>{e.preventDefault();abortTest('Вставка текста запрещена.');});$('typing').addEventListener('select',()=>{if(run){const el=$('typing'),end=el.value.length;if(el.selectionStart!==end||el.selectionEnd!==end)el.setSelectionRange(end,end);}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&run)abortTest('Окно теста было скрыто.');});
-setInterval(()=>{if(run&&!run.ending&&pending.length)flush().catch(e=>abortTest('Не удалось передать события вовремя.'));},500);
-setInterval(()=>{if(!run&&initData)refresh().catch(()=>{});},4000);
-if(tg){tg.ready();tg.expand();}
-if(!initData){$('start').textContent='Открой через Telegram';notice('Открой персональную кнопку из /getDmt в группе. В обычном браузере тест не запускается.',true);}
-else refresh().catch(e=>{notice(e.message,true);retryWith(refresh);});
+setInterval(()=>{if(run&&!run.ending&&pending.length)flush().catch(()=>abortTest('Не удалось передать события вовремя.'));},500);
+setInterval(()=>{if(!run&&!starting&&initData&&$('retry').hidden)refresh().catch(()=>{});},5000);
+if(tg){tg.ready();tg.expand();try{tg.setHeaderColor('#323437');tg.setBackgroundColor('#323437');}catch{}}
+idlePrompt();renderAttempts();if(!initData){renderView();notice('Открой персональную кнопку из /getdmt в группе. В обычном браузере тест не запускается.',true);}else refresh().catch(e=>{notice(e.message,true);retryWith(refresh);});

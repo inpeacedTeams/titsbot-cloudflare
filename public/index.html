@@ -2,28 +2,40 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
-<title>TitsBot · D calibration</title>
+<meta name="color-scheme" content="dark"><meta name="theme-color" content="#323437">
+<title>TitsBot · typing test</title>
 <link rel="stylesheet" href="/style.css">
 <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
 <script src="/app.js" defer></script>
 </head>
 <body>
 <main>
-<header><a class="brand" href="/" aria-label="TitsBot главная"><span class="mark">T</span> TitsBot</a><span class="eyebrow">ПЕРВИЧНАЯ КАЛИБРОВКА</span></header>
-<section class="intro"><div><p class="kicker">02 / TYPING TEST</p><h1>Твой темп.<br>Твой D-Tier.</h1><p class="lede">Три попытки. Лучший результат.<br>Один постоянный уровень.</p></div><div class="tier-stamp" aria-label="Итоговый D"><span>FINAL D</span><strong id="final-tier">—</strong><small id="tier-note">После двух тестов</small></div></section>
-<section class="progress" aria-label="Прогресс калибровки"><div><span class="step">01</span><div><strong>Chat Test</strong><p id="chat-state">Ожидает /getDchat</p></div></div><div><span class="step active">02</span><div><strong>MT Test</strong><p id="mt-state">0 из 3 попыток</p></div></div><div><span class="step">03</span><div><strong>D-Tier</strong><p id="tag-state">Ожидает результатов</p></div></div></section>
-<section class="test-panel" aria-labelledby="test-title">
-<div class="panel-heading"><div><p class="kicker" id="attempt-label">ПОПЫТКА 1 / 3</p><h2 id="test-title">30 секунд внимания</h2></div><div class="timer"><strong id="timer">30</strong><span id="timer-unit">секунд</span></div></div>
-<div id="prompt" class="prompt idle" aria-label="Текст для печати">Текст появится после начала попытки. Печатай вручную, исправляй ошибки Backspace и оставайся в этом окне до конца теста.</div>
-<label for="typing" class="sr-only">Ввод текста теста</label><textarea id="typing" disabled placeholder="Здесь появится твой текст…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" rows="2" aria-describedby="input-help"></textarea>
-<p class="hint" id="input-help">Только посимвольный ввод. Без вставки, автозамены и перемещения курсора.</p>
-<div class="live-metrics" aria-label="Предварительные метрики"><div><strong id="live-wpm">—</strong><span>WPM · оценка</span></div><div><strong id="live-accuracy">—</strong><span>Точность · оценка</span></div><div><strong id="wpm-weight">70%</strong><span>Вес скорости</span></div></div>
-<div class="action-row"><button id="start" disabled>Подключение… <span aria-hidden="true">↗</span></button><p id="action-note">После старта попытка расходуется,<br>даже если закрыть приложение.</p></div>
-<p id="notice" class="notice" role="status" aria-live="polite">Проверяем подключение к Telegram…</p>
-<button id="retry" class="secondary" hidden>Повторить запрос</button>
+<header class="header"><a class="brand" href="/" aria-label="TitsBot — главная"><svg viewBox="0 0 48 32" aria-hidden="true"><rect x="1.5" y="1.5" width="45" height="29" rx="5"/><path d="M9 10h3m6 0h3m6 0h3m6 0h3M9 16h3m6 0h3m6 0h3m6 0h3M12 23h24"/></svg><span><small>D-TIER CALIBRATION</small>titsbot<span class="brand-dot">.</span></span></a><button id="help-toggle" class="icon-button" aria-label="Правила теста" aria-expanded="false" aria-controls="help-panel">?</button></header>
+<section id="help-panel" class="help" hidden><h2>Как проходит тест</h2><p>Нажми на текст: после отсчёта 3–2–1 начнутся 30 секунд. Всего три попытки, для MT D учитывается лучший Score.</p><p>Печатай посимвольно, ошибки исправляй Backspace. Вставка, автозамена и IME не поддерживаются. Не закрывай и не сворачивай приложение: начатая попытка будет потрачена. Бесплатного перезапуска нет.</p><p>WPM — оставшиеся правильные символы / 5 / минуты. Raw — все введённые символы / 5 / минуты. Показатели во время набора предварительные; итог проверяет сервер.</p></section>
+<nav class="modebar" aria-label="Фиксированные параметры теста"><span class="mode-active">время</span><span class="divider"></span><strong>30 s</strong><span class="divider"></span><span id="attempt-label">попытка 1 / 3</span><span class="mode-lock" title="Правила калибровки фиксированы">калибровка</span></nav>
+<section id="test-view" class="test-view" aria-label="Тест скорости печати">
+<div class="test-top"><span id="language">русский</span><div id="live" class="live" aria-label="Предварительные показатели"><strong id="timer">30</strong><span id="timer-unit">s</span><span class="live-separator">/</span><span><b id="live-wpm">—</b> wpm</span><span><b id="live-accuracy">—</b> acc</span></div></div>
+<div id="typing-zone" class="typing-zone">
+<div id="words" class="words" aria-hidden="true"></div><div id="caret" class="caret" hidden></div>
+<label class="sr-only" for="typing">Перепечатай текст. Исправление — Backspace.</label><textarea id="typing" class="typing-input" disabled autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text" aria-describedby="prompt-accessible input-help"></textarea>
+<p id="prompt-accessible" class="sr-only"></p>
+<button id="start" class="start-overlay" disabled><span class="start-icon">↵</span><strong id="start-label">подключение…</strong><small id="start-hint">3 попытки · 30 секунд · лучший результат</small></button>
+<div id="countdown" class="countdown" hidden aria-live="polite"><strong id="countdown-value">3</strong><span>приготовься</span></div>
+<button id="refocus" class="refocus" hidden>нажми, чтобы продолжить ввод</button>
+</div>
+<p id="input-help" class="test-help"><kbd>клик по тексту</kbd> начать <span>·</span> <kbd>backspace</kbd> исправить</p>
+<p class="consume-note">Старт расходует попытку, даже если закрыть окно.</p>
 </section>
-<section class="results" aria-labelledby="results-title"><div class="section-title"><h2 id="results-title">Твои попытки</h2><span>Лучший Score → MT D</span></div><div class="attempt-grid" id="attempts"><article><p>01</p><strong>—</strong><span>Ещё не начата</span></article><article><p>02</p><strong>—</strong><span>Ещё не начата</span></article><article><p>03</p><strong>—</strong><span>Ещё не начата</span></article></div></section>
-<footer><span>D остаётся с тобой.</span><span>Без рейтингов и сезонов.</span></footer>
+<section id="result-view" class="result-view" aria-labelledby="result-title" hidden>
+<div class="result-heading"><h1 id="result-title">результат</h1><span id="result-state">проверено сервером</span></div>
+<div class="result-main"><div class="hero-stats"><div><span>wpm</span><strong id="result-wpm">—</strong></div><div><span>accuracy</span><strong id="result-accuracy">—</strong></div></div><div class="chart-block"><div class="chart-legend"><span class="legend-wpm">● wpm</span><span class="legend-raw">● raw</span><span class="legend-errors">▥ ошибки / s</span></div><canvas id="chart" role="img" aria-label="График результатов по секундам">Точные значения доступны в таблице под графиком.</canvas><p id="chart-empty" hidden>Для этой старой попытки посекундный график не сохранён.</p><p id="chart-readout" class="chart-readout" aria-live="off">WPM и raw — средняя скорость с начала теста.</p></div></div>
+<div class="stat-grid"><div><span>raw</span><strong id="result-raw">—</strong></div><div><span>consistency</span><strong id="result-consistency">—</strong></div><div><span>символы <small>верно / всего</small></span><strong id="result-characters">—</strong></div><div><span>ошибки <small>/ исправлено</small></span><strong id="result-errors">—</strong></div><div><span>время</span><strong id="result-duration">30 s</strong></div><div><span>score</span><strong id="result-score">—</strong></div></div>
+<details id="chart-data" class="chart-data"><summary>данные по секундам</summary><div class="table-scroll"><table><caption>Средняя скорость с начала попытки; ошибки за отдельную секунду</caption><thead><tr><th>Секунда</th><th>WPM</th><th>Raw</th><th>Ошибки</th></tr></thead><tbody id="chart-rows"></tbody></table></div></details>
+<div class="result-actions"><button id="next" class="next-button">следующая попытка →</button><span id="result-note">Лучший Score учитывается в MT D.</span></div>
+</section>
+<div class="feedback"><p id="notice" role="status" aria-live="polite">Проверяем подключение к Telegram…</p><button id="retry" class="text-button" hidden>повторить запрос ↻</button></div>
+<section class="attempt-section" aria-labelledby="attempts-title"><div class="section-heading"><h2 id="attempts-title">твои попытки</h2><span>лучший score → MT D</span></div><div id="attempts" class="attempts"></div></section>
+<section class="calibration" aria-label="Итоги калибровки"><div><span>chat d</span><strong id="chat-state">—</strong></div><div><span>mt d</span><strong id="mt-state">—</strong></div><div class="final"><span>final d</span><strong id="final-tier">—</strong></div><p id="tag-state">Итог после двух тестов</p></section>
+<footer><span>titsbot · 30 секунд внимания</span><span id="weight-note">оценку рассчитывает сервер</span></footer>
 </main>
 </body></html>
